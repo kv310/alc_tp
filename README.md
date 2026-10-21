@@ -1,2 +1,8 @@
 # alc_tp
-TP de la facultad para trabajar en grupo
+Trabajo Práctico: Calibración y Pose de la Cámara.
+
+Integrantes:
+Francisco Fogwill
+Augusto
+Benjamín
+Ezequiel
