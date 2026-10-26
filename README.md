@@ -94,7 +94,7 @@ durante el desarrollo** para **verificar** los resultados de las implementacione
   llega a `main` exclusivamente vía **Pull Request**.
 - **Aprobación de PRs**: cada PR requiere la aprobación de **al menos 2 integrantes**
   del grupo antes del merge.
-- Ramas por issue (cono `<n>-<titulo-del-issue>`) o de workspace personal
+- Ramas por issue (con prefijo `<n>-<titulo-del-issue>`) o de workspace personal
   (`<usuario>/<tema>`) — ver `CONTEXTO_TP2.md` para el detalle de la convención.
 - Los PRs deben referenciar el issue que cierran (`Closes #N`) y pasar los unit tests
   correspondientes antes del merge.
