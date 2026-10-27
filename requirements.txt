@@ -1,0 +1,18 @@
+# requirements.txt — TP ALC (alc_tp)
+# Entorno de desarrollo de referencia: conda env "tp_algebra" (Python 3.12)
+# Instalar con: pip install -r requirements.txt
+#
+# El archivo es neutral: el destino de la instalación lo fija el pip que lo
+# ejecuta (env conda, venv, python global...). Ver README, sección Instalación.
+
+# --- Runtime (biblioteca + notebooks del entregable) ---
+numpy==2.5.4            # alc.py y todos los ejercicios (core)
+matplotlib==3.11.1      # plots de la notebook entregable
+pandas                  # carga CSV (chequeo_puntos_3d.ipynb usa pd.read_csv)
+# opencv-python==4.14.0 # Ej 3: detección de esquinas findChessboardCorners (issue #6) — OPCIONAL
+
+# --- QA / tests ---
+pytest>=8               # tests/test_ej2.py, tests/test_ej3.py (issue #7 / PR #23)
+
+# --- Entorno de la notebook ---
+ipykernel>=6            # kernel "tp_algebra" para VS Code (también nbformat si pide)
