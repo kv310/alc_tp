@@ -334,3 +334,168 @@ class TestArmarA:
         A = alc.armarA([np.diag([2.0, 3.0, 1.0])])
         assert np.allclose(A[0], [0, 6, 0, 0, 0, 0], atol=ATOL)
         assert np.allclose(A[1], [4, 0, -9, 0, 0, 0], atol=ATOL)
+
+# ======================================================================
+# calcularMatrizK2D
+# ======================================================================
+
+class TestCalcularMatrizK2D:
+
+    def test_shape_y_K33(self, datos_sinteticos):
+        """K es (3,3) y sale normalizada con K[2,2] = 1."""
+        A = alc.armarA(datos_sinteticos["Hlst"])
+        K = alc.calcularMatrizK2D(A)
+        assert K.shape == (3, 3)
+        assert np.isclose(K[2, 2], 1.0, atol=1e-12)
+
+    def test_round_trip_sintetico(self, datos_sinteticos):
+        """INVARIANTE CLAVE: K(A de 5 vistas exactas) == K_ground_truth.
+        Puramente construido desde K → Hs → proyecciones (no se reimplementa)."""
+        d = datos_sinteticos
+        K = alc.calcularMatrizK2D(alc.armarA(d["Hlst"]))
+        assert np.allclose(K, d["K"], atol=1e-9)
+
+    def test_minimo_3_vistas(self, datos_sinteticos):
+        """El enunciado: 3 vistas alcanzan para K completa (γ incluido)."""
+        A3 = alc.armarA(datos_sinteticos["Hlst"])[:6]     # 3 vistas = 6 filas
+        K = alc.calcularMatrizK2D(A3)
+        assert np.allclose(K, datos_sinteticos["K"], atol=1e-9)
+
+    def test_guard_dos_vistas(self, datos_sinteticos):
+        """2 vistas (4 filas en A) → AssertionError (< mínimo del enunciado)."""
+        A2 = alc.armarA(datos_sinteticos["Hlst"])[:4]
+        with pytest.raises(AssertionError):
+            alc.calcularMatrizK2D(A2)
+
+    def test_guard_shape_columnas(self, datos_sinteticos):
+        """A mal armada (no (·,6)) → AssertionError."""
+        A = alc.armarA(datos_sinteticos["Hlst"])
+        with pytest.raises(AssertionError):
+            alc.calcularMatrizK2D(A[:, :5])
+
+    def test_signo_arbitrario_de_b(self, datos_sinteticos):
+        """El sistema homogéneo es mulo el signo: K(−A) == K(A) —
+        chequeo directo de la operación "elegir el signo que hace B def. positiva"."""
+        A = alc.armarA(datos_sinteticos["Hlst"])
+        assert np.allclose(alc.calcularMatrizK2D(-A),
+                           alc.calcularMatrizK2D(A), atol=1e-9)
+
+    def test_con_datos_reales_plausibilidad(self):
+        """Cadenas completas con los 10 captcha-sheet reales:
+        corners → Q → H → A → K. Umbrales de plausibilidad FIJADOS desde la
+        corrida 2026-10-27 (no aprobados a mano): fx=742.3, fy=753.6
+        (ratio 0.985) y c = (520.5, 299.3), contra el centro teórico del
+        formato 1024×576 ~ (512, 288)."""
+        archivo = os.path.join(REPO, "calib", "coplanar", "detected_corners.txt")
+        if not os.path.exists(archivo):
+            pytest.skip("no hay datos reales en esta máquina")
+        det = np.loadtxt(archivo)                       # (10, 154)
+        objPts = np.column_stack([30.0 * (np.arange(77) % 11),
+                                  30.0 * (np.arange(77) // 11),
+                                  np.zeros(77)])
+        Hs = [alc.resolverDLT2D(alc.obtenerQ2d(det[k].reshape(77, 2), objPts))
+              for k in range(det.shape[0])]
+        K = alc.calcularMatrizK2D(alc.armarA(Hs))
+
+        assert np.all(np.isfinite(K))                   # sin NaN/inf
+        assert K[0, 0] > 0 and K[1, 1] > 0              # focales positivas
+        assert abs(K[0, 0] / K[1, 1] - 1.0) < 0.15      # fx ≈ fy (medido: 1.5%)
+        assert abs(K[0, 2] - 512.0) < 50.0              # u0 cerca de 512 (medido: +8.5)
+        assert abs(K[1, 2] - 288.0) < 50.0              # v0 cerca de 288 (medido: +11.3)
+
+# ======================================================================
+# obtenerPose2D
+# ======================================================================
+class TestObtenerPose2D:
+
+    def test_pose_exacta_sintetica(self, datos_sinteticos):
+        """H = K[r1 r2 t] exacta → pose recupera r1, r2, t y R ortogonal."""
+        d = datos_sinteticos
+        K, H0 = d["K"], d["Hlst"][0]
+        X, Y = d["objPts"][:, 0], d["objPts"][:, 1]
+        w = H0 @ np.vstack([X, Y, np.ones_like(X)])
+        imgPts = np.column_stack([w[0] / w[2], w[1] / w[2]])
+        H_rec = alc.resolverDLT2D(alc.obtenerQ2d(imgPts, d["objPts"]))
+        H_rec = H_rec / H_rec[2, 2]
+        Rj, tj = alc.obtenerPose2D(H_rec, K)
+
+        # R1: (r1, r2, r3) = la parte de rotación de la pose verdadera
+        c, s = np.cos(np.deg2rad(20.0)), np.sin(np.deg2rad(20.0))
+        r1_true = np.array([c, 0.0, -s])
+        r2_true = np.array([0.0, 1.0, 0.0])
+        r3_true = np.cross(r1_true, r2_true)
+        t_true = np.array([100.0, 50.0, 2000.0]) 
+        assert np.allclose(Rj[:, 0], r1_true, atol=1e-6)
+        assert np.allclose(Rj[:, 1], r2_true, atol=1e-6)
+        assert np.allclose(Rj[:, 2], r3_true, atol=1e-6)
+        assert np.allclose(tj, t_true, atol=1e-6)          # t vuelve en unidades de H
+
+    def test_ortogonalidad_y_det(self, datos_sinteticos):
+        """Para la vista 0: RᵀR = I y det(R) = +1 con 1e-9."""
+        d = datos_sinteticos
+        Rj, _ = alc.obtenerPose2D(d["Hlst"][0], d["K"])
+        assert np.allclose(Rj.T @ Rj, np.eye(3), atol=1e-9)
+        assert np.isclose(np.linalg.det(Rj), 1.0, atol=1e-9)
+
+    def test_reproyeccion_pose(self, datos_sinteticos):
+        """La pose de vuelta [R|t] reproduce las imágenes con K [R|t]."""
+        d = datos_sinteticos
+        K, H0, objPts = d["K"], d["Hlst"][0], d["objPts"]
+        Rj, tj = alc.obtenerPose2D(H0, K)
+        X, Y = objPts[:, 0], objPts[:, 1]
+        
+        # puntos del plano en 3-D con Su Z=0 (no homogéneos con '1':
+        # el r3 de R vive en la dimensión Z del sistema de cámara)
+        Z = np.zeros_like(X)
+        p_c = Rj @ np.vstack([X, Y, Z]) + tj[:, None]   # K·(r1·x + r2·y + t)
+        u = K[0, :] @ p_c / p_c[2]
+        v = K[1, :] @ p_c / p_c[2]
+        w2 = H0 @ np.vstack([X, Y, np.ones_like(X)])    # vía H: H·[x,y,1] (esto sí lleva '1')
+        assert np.allclose(u, w2[0] / w2[2], atol=1e-9)
+        assert np.allclose(v, w2[1] / w2[2], atol=1e-9)
+
+    def test_ortogonalidad_todas_las_vistas(self, datos_sinteticos):
+        """RRᵀ=I y det=+1 en TODAS las vistas (λ distinto por vista)."""
+        d = datos_sinteticos
+        for k, H in enumerate(d["Hlst"]):
+            Rj, _ = alc.obtenerPose2D(H, d["K"])
+            assert np.allclose(Rj.T @ Rj, np.eye(3), atol=1e-9), f"vista {k}"
+            assert np.isclose(np.linalg.det(Rj), 1.0, atol=1e-9), f"vista {k}"
+
+    def test_signo_arbitrario_de_H(self, datos_sinteticos):
+        """Si el DLT devuelve −H, la pose sigue una rotación válida
+        (alternativa R' = R·diag(−1,−1,1), det +1, RRᵀ=I) — el usuario proviene
+        del signo arbitrario del vector nulo (mismo fenómeno que el caso de b)."""
+        d = datos_sinteticos
+        H0 = d["Hlst"][0]
+        Rj, _ = alc.obtenerPose2D(-H0, d["K"])
+        assert np.allclose(Rj.T @ Rj, np.eye(3), atol=1e-9)
+        assert np.isclose(np.linalg.det(Rj), 1.0, atol=1e-9)
+
+    def test_con_datos_reales_pose(self):
+        """Pose de la imagen 1 real con K de las 10: reproduce las esquinas
+        con tolerancia holgada (el ruido de H rompe la ortogonalidad exacta
+        — la banda de power de este test guard es Hartley, issue #8)."""
+        archivo = os.path.join(REPO, "calib", "coplanar", "detected_corners.txt")
+        if not os.path.exists(archivo):
+            pytest.skip("no hay datos reales en esta máquina")
+        det = np.loadtxt(archivo)
+        objPts = np.column_stack([30.0*(np.arange(77)%11),
+                                  30.0*(np.arange(77)//11),
+                                  np.zeros(77)])
+        Hs = [alc.resolverDLT2D(alc.obtenerQ2d(det[k].reshape(77,2), objPts))
+              for k in range(det.shape[0])]
+        K = alc.calcularMatrizK2D(alc.armarA(Hs))
+        Rj, tj = alc.obtenerPose2D(Hs[0], K)
+
+        # ortogonalidad "aproximada" del nivel del ruido pixel (medida al volar)
+        assert np.linalg.norm(Rj.T @ Rj - np.eye(3)) < 0.05
+
+        # reprojection path de la pose
+        imgPts = det[0].reshape(77, 2)
+        X, Y = objPts[:, 0], objPts[:, 1]
+        p_c = Rj @ np.vstack([X, Y, np.zeros(77)]) + tj[:, None]
+        u = K[0, :] @ p_c / p_c[2]
+        v = K[1, :] @ p_c / p_c[2]
+        err = np.max(np.sqrt((u - imgPts[:, 0])**2 + (v - imgPts[:, 1])**2))
+        assert err < 5.0
