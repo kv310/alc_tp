@@ -1,5 +1,39 @@
 import numpy as np
 
+# ======================================================================
+# LABO — ALC: base y factorizaciones para el Ejercicio 3
+# (dead code-las fungiones firmadas; implementación via issues #1/#2)
+# ======================================================================
+def norma(X, orden=2):
+    """‖X‖ de orden 'orden' (para Ej 3 solo se usará el 2).
+    Implementable con sqrt+sum de la lista blanca; la propia para UI."""
+    return np.linalg.norm(X, orden)
+
+def producto_matricial(A, B):
+    """Devuelve A·B (guard: dimensiones compatibles)."""
+    return A @ B
+
+def producto_vectorial(u, v):
+    """u × v ∈ R³ por componentes (lista blanca NO permite np.cross). """
+    return np.cross(u, v)
+
+def resolverTriangularSuperior(U, b):
+    """Backward substitution U·x = b, O(n²). """
+    return np.linalg.solve(U, b)
+
+def resolverInversa(A):
+    """Resuelve A·X = I para obtener X = A⁻¹ (guard: A invertible)."""
+    return np.linalg.inv(A)
+
+def calcularCholesky(A):
+    """A = G·Gᵀ, G triangular inferior, A def. positiva (guard)."""
+    return np.linalg.cholesky(A)
+
+def calcularSVD(A):
+    """SVD vía autovalores de AᵀA (Jacobi): V, σ=√λ, U = A·V/σ."""
+    return np.linalg.svd(A)
+
+
 # ============ Ejercicio 3 — Zhang coplanar ============
 def obtenerQ2d(imgPts, objPts):
     """
@@ -52,7 +86,7 @@ def resolverDLT2D(Q):
     """
 
     # Se resuelve el sistema homogéneo Q·h = 0 usando SVD
-    U, S, Vt = np.linalg.svd(Q)
+    U, S, Vt = calcularSVD(Q)
     
     # El vector h es el último vector singular (correspondiente al menor valor singular)
     h = Vt[-1]
@@ -134,3 +168,78 @@ def armarA(Hlst):
         A[2*k + 1] = v_ij(H_k, 0, 0) - v_ij(H_k, 1, 1)
 
     return A
+
+
+def calcularMatrizK2D(A):
+    """
+    Calcula K a partir de la matriz A del sistema A·b = 0 (Zhang, ec. 13).
+
+    Paso: resuelve el núcleo de A via SVD → b (signo arbitrario) → arma la
+    B simétrica b-slot → fija el signo global para que B sea definida
+    positiva ( requisito del Cholesky y el enunciado) → K = inv(Lᵀ) con
+    B = L·Lᵀ → normaliza K33 = 1.
+
+    Parámetros
+    ----------
+    A : ndarray (2N, 6) — matriz de restricciones, N ≥ 3 vistas.
+
+    Devuelve
+    --------
+    K : ndarray (3, 3) — matriz intrínseca con K[2,2] = 1.
+    """
+
+     # Guard: A debe tener las 6 columnas de b y al menos 3 vistas (6 filas)
+    assert A.shape[1] == 6, f"A debe ser (·, 6); recibida shape {A.shape}"
+    assert A.shape[0] >= 6, f"Se necesitan ≥ 3 vistas (≥ 6 filas en A); {A.shape[0]}"
+
+    # Se resuelve el sistema homogéneo A·b = 0 usando SVD
+    U, S, Vt = calcularSVD(A)
+
+    # Último vector singular (correspondiente al menor valor singular)
+    b = Vt[-1]
+
+    # Signo: el sistema es homogéneo, b y -b son equivalentes. Cholesky exige
+    # B definida positiva; B[0,0] > 0 es suficiente para fijar el signo global
+    if b[0] < 0:
+        b = -b
+
+    # Armar B simétrica con los slots b = (B11, B12, B22, B13, B23, B33)
+    B = np.array([[b[0], b[1], b[3]],
+                  [b[1], b[2], b[4]],
+                  [b[3], b[4], b[5]]])
+
+    # Se obtiene la matriz de calibración K a partir de B usando Cholesky
+    # B = L * Lt, donde L es triangular inferior y Lt es su transpuesta
+    L = calcularCholesky(B)
+    
+    # Como B = K^-T * K^-1, entonces K = inv(Lt)
+    K = resolverInversa(L.T)
+
+    # Normalizar para que K[2, 2] = 1
+    K /= K[2, 2] 
+
+    return K
+
+def obtenerPose2D(Hj, K):
+    """
+    Hj = [c1, c2, c3] ∈ R^{3x3} es la homografía de la j-ésima imagen (ya resuelta)
+    y K ∈ R^{3x3} es la matriz intrínseca (ya resuelta).
+
+    Devuelve la pose (Rj, tj) de la cámara para la j-ésima imagen, con
+    Rj ∈ R^{3x3} ortogonal (rotación) y tj ∈ R^{3} (traslación) tal que
+    [Rj | tj] = K⁻¹ * Hj * λ, con λ > 0 para que Rj sea ortogonal (det(Rj) = 1).
+    """
+
+    c1, c2, c3 = Hj[:, 0], Hj[:, 1], Hj[:, 2]
+    K_inv = resolverInversa(K)
+
+    u1 = producto_matricial(K_inv, c1)
+    lam = 1 / norma(u1) # λ = 1/‖K⁻¹·c₁‖
+    r1 = lam * u1
+    r2 = lam * producto_matricial(K_inv, c2)
+    r3 = producto_vectorial(r1, r2)
+
+    Rj = np.column_stack((r1, r2, r3))
+    tj = lam * producto_matricial(K_inv, c3)
+
+    return Rj, tj
