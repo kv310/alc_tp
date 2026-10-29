@@ -683,3 +683,65 @@ def producto_cruz(a, b):
     res[1] = a[2]*b[0] - a[0]*b[2]
     res[2] = a[0]*b[1] - a[1]*b[0]
     return res
+
+# ======================================================================
+# Ejercicio 2 — Calibración de cámara 3-D (DLT)
+# ======================================================================
+def obtenerQ3d(imgPts, objPts):
+    """
+    Dada una vista del objeto, arma la matriz del sistema DLT (ec. 6 de Tsai 1987).
+
+    Con imgPts (n, 2): pixeles (u, v) de los n puntos en ESTA vista
+    Con objPts (n, 3): correspondencias (U, V, W) reales en cm.
+
+    Devuelve:
+      Q : (2n, 12) — dos filas por punto; para cada i:
+            [U, V, W, 1, 0, 0, 0, 0, -uU, -uV, -uW, -u]       (fila impar)
+            [0, 0, 0, 0, U, V, W, 1, -vU, -vV, -vW, -v]       (fila par)
+      tal que Q m = 0 con m = (m11..m34) elementos de M por filas.
+
+    Supone: misma cámara física en los n puntos (una única vista/pose).
+    """
+    n_obj = objPts.shape[0]
+    n_img = imgPts.shape[0]
+    assert n_obj == n_img, "Cantidad de puntos 3D y 2D debe ser la misma"
+
+    Q = np.zeros((2*n_img, 12))
+
+    for i in range(n_img):
+        u, v = imgPts[i]
+        U, V, W = objPts[i]
+
+        Q[2*i]     = [U, V, W, 1, 0, 0, 0, 0, -u*U, -u*V, -u*W, -u]
+        Q[2*i + 1] = [0, 0, 0, 0, U, V, W, 1, -v*U, -v*V, -v*W, -v]
+    
+    return Q
+
+def resolverDLT3D(Q):
+    """
+    Resuelve el DLT: devuelve la matriz de cámara M (3, 4) desde Q de obtenerQ3d.
+
+    Implementa ec. 8 (Ej 1b): m = arg min ||Qm||² con ||m|| = 1 →
+    m = v12 = última fila de Vt (autovector derecho del menor valor singular).
+    Determinada salvo escala y signo; se impone m34 >= 0 (camara "hacia
+    adelante": con calib/3d equivale a w > 0).
+
+    Requiere Q (2n, 12) con n >= 6 (rango 11, Ej 1a).
+    """
+
+    assert Q.shape[1] == 12, "Q debe tener 12 columnas (12 incognitas del DLT)"
+    assert Q.shape[0] >= 12, "Q debe tener al menos 12 filas (n >= 6 puntos, Ej 1a)"
+
+    _,_,Vt = svd(Q)
+    v12 = Vt[11] # v12 es un array de R12 -> autovector de menor sigma
+    m = v12 # [m11, m12, m13, m14, m21, m22, m23, m24, m31, m32, m33, m34]
+
+    M = m.reshape(3,4) # reshape reordena row-major, llena fila 1, fila 2, fila 3, con elementos de izquierda a derecha
+    # M =
+    # [m11, m12, m13, m14] = [r11, r12, r13, t1] 
+    # [m21, m22, m23, m24] = [r21, r22, r23, t2]
+    # [m31, m32, m33, m34] = [r31, r32, r33, t3]
+
+    if M[2,3] < 0: M *= -1 # Opcional: se pide para determinar el signo y facilitar la ejecución de Tests
+
+    return M
