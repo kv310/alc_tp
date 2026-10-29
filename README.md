@@ -7,6 +7,53 @@ Augusto
 Benjamín
 Ezequiel
 
+# Instalación (entorno de desarrollo)
+
+El proyecto requiere **Python 3.12** con los paquetes de `requirements.txt`.
+El archivo es neutral: declara paquetes y versiones, y el destino de la
+instalación lo fija el pip que lo ejecuta (env conda, venv, python global...).
+Abajo el ejemplo con conda, que es la referencia del grupo; si usás venv,
+adaptá los pasos 1 y 2 a tu manager.
+
+## 1. Crear el entorno (solo la primera vez)
+
+```powershell
+conda create -n tp_algebra python=3.12 -y
+conda activate tp_algebra
+```
+
+Si `conda` no se reconoce en PowerShell: `C:\Users\<tu-user>\miniconda3\Scripts\conda.exe init powershell`
+y abrí una terminal nueva.
+
+## 2. Instalar las dependencias
+
+```powershell
+pip install -r requirements.txt
+```
+
+Alternativa que no depende del env activado (rutas siempre explícitas):
+
+```powershell
+C:\Users\<tu-user>\miniconda3\envs\tp_algebra\python.exe -m pip install -r requirements.txt
+```
+
+## 3. Verificar la instalación
+
+```powershell
+python -c "import numpy, matplotlib, pandas, pytest; print('OK', numpy.__version__, matplotlib.__version__)"
+python -m pytest tests/ -v
+```
+
+(si instalaste `opencv-python` — opcional en `requirements.txt` — sumalo al import
+de verificación: `import numpy, cv2, ...`).
+
+## 4. Kernel de la notebook (VS Code)
+
+Abrir `grupo_XX_TP.ipynb` → arriba a la derecha → **Select Kernel** →
+`tp_algebra (Python 3.12)`. Si el kernel no aparece (o pide el paquete
+`notebook`), recargar la ventana (`Ctrl+Shift+P` → Developer: Reload Window);
+el paquete faltante lo instala VS Code en el env seleccionado.
+
 # Reglas de entrega — TP 2 (ALC, 2°C 2026)
 
 ## 🧼 Calidad de código
@@ -16,6 +63,20 @@ Ezequiel
 - **Comentarios internos**: las secciones de código dentro de la función deben estar
   debidamente comentadas de a bloques.
 - **Nombres de variables**: deben ser **explicativos** (nada de `x1`, `tmp`, `arr2`).
+- **Unit tests**: cada función implementada en `alc.py` debe tener sus **tests unitarios
+  correspondientes** (carpeta `tests/`, un archivo por ejercicio, ej. `tests/test_ej3.py`),
+  en tres niveles:
+  1. **Estructurales** — shapes, guards (el `assert` de entradas inconsistentes).
+  2. **Construcción sintética** — se genera primero la solución conocida (H, K
+     sintéticas), se fabrican los datos de entrada desde esa solución y se verifica
+     que la función la recupera (tolerancia `1e-9`). El test **no reimplementa** la
+     función: valida contra una construcción independiente.
+  3. **Regresión con datos reales** — los checks de QA (shapes, error de reproyección
+     con tolerancias holgadas) fijados como baseline.
+
+  Los tests son herramienta de desarrollo, **no forman parte del código entregado**,
+  así que en ellos sí se permite todo (incluido lo prohibido más abajo). Correr con
+  `python -m pytest tests/ -v` (desde la raíz del repo).
 
 ## 📦 Uso de librerías — la lista blanca
 
@@ -73,6 +134,17 @@ durante el desarrollo** para **verificar** los resultados de las implementacione
 > 💡 Estrategia estándar: prototipás con `np.linalg.svd` (1 línea), después implementás tu
 > propio descompoenente SVD en el módulo ALC, y comparás contra el prototipo hasta que den
 > lo mismo.
+
+## 🔀 Flujo de trabajo con Git y PRs
+
+- **No pushear directamente a `main`**: la rama principal no recibe push directo. Todo cambio
+  llega a `main` exclusivamente vía **Pull Request**.
+- **Aprobación de PRs**: cada PR requiere la aprobación de **al menos 2 integrantes**
+  del grupo antes del merge.
+- Ramas por issue (con prefijo `<n>-<titulo-del-issue>`) o de workspace personal
+  (`<usuario>/<tema>`) — ver `CONTEXTO_TP2.md` para el detalle de la convención.
+- Los PRs deben referenciar el issue que cierran (`Closes #N`) y pasar los unit tests
+  correspondientes antes del merge.
 
 ## 📝 Presentación: conclusiones y razonamientos
 
