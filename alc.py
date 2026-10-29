@@ -586,9 +586,11 @@ def autovalores(A, tol=1e-15, K=1000):
     if A.shape[0] == 2:
         S = Hv1
         D = multiplicar(Hv1, multiplicar(A, transponer(Hv1)))
+        D = (D + transponer(D)) / 2 #simetrizar (el redondeo la deja apenas asimetrica)
 
     else:
         B = multiplicar(Hv1, multiplicar(A, transponer(Hv1)))
+        B = (B + transponer(B)) / 2 #simetrizar (el redondeo la deja apenas asimetrica)
         A_ = B[1:,1:]
         S_, D_ = autovalores(A_,tol,K)
 
@@ -681,3 +683,34 @@ def producto_cruz(a, b):
     res[1] = a[2]*b[0] - a[0]*b[2]
     res[2] = a[0]*b[1] - a[1]*b[0]
     return res
+
+
+
+def svd_reducida(A, k="max", tol=1e-15):
+    m = A.shape[0]
+    n = A.shape[1]
+
+    if m < n:
+        hatV_t, hatSig, hatU_t = svd_reducida(traspuesta(A), k, tol)
+        return hatU_t, hatSig, hatV_t
+
+    AtA = multAB(traspuesta(A), A)
+    S, D = diagRH(AtA, 10000)
+
+    r = 0
+    while r < n and not sonIgualesTol(D[r, r], 0, tol):
+        r += 1
+    if k != "max" and k < r:
+        r = k
+
+    hatSig = np.zeros(r)
+    for i in range(r):
+        hatSig[i] = np.sqrt(abs(D[i, i]))
+    hatV = S[:, :r]
+
+    B = multAB(A, hatV)
+    hatU = np.zeros((m, r))
+    for i in range(r):
+        hatU[:, i] = B[:, i] / norma(B[:, i], 2)
+
+    return hatU, hatSig, hatV
