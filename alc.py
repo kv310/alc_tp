@@ -697,6 +697,7 @@ def producto_cruz(a, b):
     res[2] = a[0]*b[1] - a[1]*b[0]
     return res
 
+
 # ======================================================================
 # Ejercicio 2 — Calibración de cámara 3-D (DLT)
 # ======================================================================
@@ -1143,3 +1144,317 @@ def obtenerPose2D(Hj, K):
         tj = -tj
 
     return Rj, tj
+
+
+
+# ======================================================================
+# Ejercicio 6 — Aterrizaje suave: POSIT coplanar
+#
+# Convenciones:
+#   - Pose: X_cam = R·X_obj + t. Las filas de R son los ejes i, j, k de la
+#     cámara expresados en el sistema del objeto; k es el eje óptico.
+#   - Píxeles (u, v): origen arriba a la izquierda, v hacia abajo.
+#   - K tiene fx != fy. POSIT trabaja con una única focal f = fx sobre
+#     coordenadas "virtuales" centradas: x = fx·x_n, y = fx·y_n, donde
+#     (x_n, y_n) son las coordenadas normalizadas K⁻¹·(u, v, 1). Así la
+#     cámara virtual es diag(fx, fx) y no se confunde fy con fx.
+#   - Los puntos del objeto son coplanares con W constante; la normal
+#     unitaria al plano en el sistema del objeto es n = (0, 0, 1).
+# ======================================================================
+
+
+def calculoLambdaMu(I0, J0):
+    """
+    Resuelve λ y μ para I = I0 + λ·n, J = J0 + μ·n (POSIT coplanar), con
+    I0, J0 ⟂ n, de modo que ‖I‖ = ‖J‖ e I·J = 0:
+
+        λ·μ     = -I0·J0
+        λ² - μ² = ‖J0‖² - ‖I0‖²
+
+    Equivale a (λ + iμ)² = C con C = (‖J0‖² - ‖I0‖²) - 2i·(I0·J0); las dos
+    soluciones son las raíces cuadradas opuestas de C.
+
+    Parámetros
+    ----------
+    I0, J0 : ndarray (3,) — soluciones de mínimos cuadrados, ortogonales a n.
+
+    Devuelve
+    --------
+    ((λ1, μ1), (λ2, μ2)) : tupla de dos parejas de floats, con
+        λ1 >= 0 y (λ2, μ2) = (-λ1, -μ1). Si C ≈ 0 (caso degenerado:
+        I0 y J0 ya ortogonales y de igual norma) ambas parejas son (0, 0).
+    """
+    # Parte real e imaginaria de C = (λ + iμ)²
+    parte_real = np.sum(J0 * J0) - np.sum(I0 * I0)
+    parte_imag = -2.0 * np.sum(I0 * J0)
+    modulo = np.sqrt(parte_real**2 + parte_imag**2)
+
+    # Raíz cuadrada compleja sin trigonometría:
+    #   λ = √((|C| + Re C)/2),  μ = signo(Im C)·√((|C| - Re C)/2)
+    # Los max(·, 0) evitan raíces de negativos por redondeo.
+    lambda_1 = np.sqrt(max((modulo + parte_real) / 2.0, 0.0))
+    mu_1 = np.sqrt(max((modulo - parte_real) / 2.0, 0.0))
+    if parte_imag < 0:
+        mu_1 = -mu_1
+
+    return (float(lambda_1), float(mu_1)), (float(-lambda_1), float(-mu_1))
+
+
+def calcularSalidaPOSIT(Is, Js, fx, m0, M0):
+    """
+    Recupera la pose (R, t) a partir de los vectores I = (f/Z0)·i y
+    J = (f/Z0)·j de una pose candidata de POSIT.
+
+    Parámetros
+    ----------
+    Is, Js : ndarray (3,) — vectores I y J de la candidata (ya corregidos
+             con λ·n y μ·n).
+    fx     : float — focal común de la cámara virtual, en píxeles.
+    m0     : ndarray (2,) — imagen del punto de referencia M0 en
+             coordenadas virtuales centradas (x0, y0).
+    M0     : ndarray (3,) — punto de referencia en el sistema del objeto.
+
+    Devuelve
+    --------
+    i, j, k : ndarray (3,) — ejes unitarios de la cámara en el sistema del
+              objeto (k = i × j es el eje óptico).
+    Z0      : float — profundidad de M0 en el sistema de la cámara.
+    R       : ndarray (3, 3) — rotación con filas i, j, k (RᵀR = I, det R = +1).
+    t       : ndarray (3,)   — traslación tal que X_cam = R·X_obj + t.
+    """
+    norma_I = np.sqrt(np.sum(Is * Is))
+    norma_J = np.sqrt(np.sum(Js * Js))
+    assert norma_I > 0 and norma_J > 0, "I o J nulos: pose degenerada"
+
+    # Ejes de la cámara. Con λ, μ de calculoLambdaMu, I ⟂ J y ‖I‖ = ‖J‖,
+    # así que i, j son ortonormales y k = i × j completa la rotación.
+    eje_i = Is / norma_I
+    eje_j = Js / norma_J
+    eje_k = producto_cruz(eje_i, eje_j)
+    R = np.vstack([eje_i, eje_j, eje_k])
+
+    # Profundidad de M0: ‖I‖ = f/Z0
+    Z0 = fx / norma_I
+
+    # M0 en la cámara es (x0·Z0/f, y0·Z0/f, Z0); de ahí t = M0_cam - R·M0
+    M0_camara = np.array([m0[0] * Z0 / fx, m0[1] * Z0 / fx, Z0])
+    t = M0_camara - multiplicar(R, M0)
+    return eje_i, eje_j, eje_k, Z0, R, t
+
+
+def proyectarPuntos(R, t, obj_vecs, K):
+    """
+    Proyecta los puntos del objeto con la pose (R, t) y la matriz K.
+    Auxiliar de evaluarPose; también sirve para graficar reproyecciones.
+
+    Parámetros
+    ----------
+    R        : ndarray (3, 3) — rotación.
+    t        : ndarray (3,)   — traslación.
+    obj_vecs : ndarray (n, 3) — puntos en el sistema del objeto.
+    K        : ndarray (3, 3) — matriz intrínseca.
+
+    Devuelve
+    --------
+    proyectados   : ndarray (n, 2) — píxeles (u, v); nan si Z <= 0.
+    profundidades : ndarray (n,)   — Z de cada punto en la cámara.
+    """
+    # Puntos en el sistema de la cámara: X_cam = R·X + t (una fila por punto)
+    puntos_camara = multiplicar(obj_vecs, R.T) + t
+    profundidades = puntos_camara[:, 2]
+    validos = profundidades > 0
+
+    # Proyección con K solo de los puntos delante de la cámara
+    proyectados = np.zeros((obj_vecs.shape[0], 2)) + np.nan
+    if np.any(validos):
+        homogeneos = multiplicar(puntos_camara[validos], K.T)
+        proyectados[validos, 0] = homogeneos[:, 0] / homogeneos[:, 2]
+        proyectados[validos, 1] = homogeneos[:, 1] / homogeneos[:, 2]
+    return proyectados, profundidades
+
+
+def evaluarPose(R, t, obj_vecs, img_vecs, K):
+    """
+    Reproyecta los puntos del objeto con la pose (R, t) y la matriz K y
+    mide el error contra los píxeles observados.
+
+    Parámetros
+    ----------
+    R        : ndarray (3, 3) — rotación.
+    t        : ndarray (3,)   — traslación.
+    obj_vecs : ndarray (n, 3) — puntos en el sistema del objeto.
+    img_vecs : ndarray (n, 2) — píxeles observados (u, v) originales.
+    K        : ndarray (3, 3) — matriz intrínseca.
+
+    Devuelve
+    --------
+    n_validos : int — cantidad de puntos con Z > 0 (proyecciones válidas).
+    rms       : float — √(media de ‖(u,v)_proy - (u,v)_obs‖²) en píxeles;
+                np.inf si algún punto queda con Z <= 0 (pose inválida).
+    """
+    assert obj_vecs.shape[0] == img_vecs.shape[0], "Cantidad de puntos distinta"
+
+    proyectados, profundidades = proyectarPuntos(R, t, obj_vecs, K)
+    n_validos = int(np.sum(profundidades > 0))
+
+    # El RMS solo tiene sentido si todos los puntos son visibles
+    if n_validos < img_vecs.shape[0]:
+        return n_validos, np.inf
+    rms = np.sqrt(np.mean(np.sum((proyectados - img_vecs)**2, axis=1)))
+    return n_validos, float(rms)
+
+
+def aplicarPOSIT(obj_vecs, img_vecs, K, MaxIt, atol):
+    """
+    Inciso e: pose de la cámara por POSIT coplanar (ver iterarPOSIT).
+
+    Parámetros
+    ----------
+    obj_vecs, img_vecs, K, MaxIt, atol : como en iterarPOSIT.
+
+    Devuelve
+    --------
+    R : ndarray (3, 3) — rotación de la mejor pose válida.
+    t : ndarray (3,)   — traslación de la mejor pose válida.
+    """
+    R, t, _ = iterarPOSIT(obj_vecs, img_vecs, K, MaxIt, atol)
+    return R, t
+
+
+def iterarPOSIT(obj_vecs, img_vecs, K, MaxIt, atol):
+    """
+    POSIT coplanar con diagnóstico: estima la pose de la cámara a partir de
+    n >= 4 puntos coplanares (W constante) y sus imágenes, tomando
+    obj_vecs[0] como M0. aplicarPOSIT devuelve solo (R, t) de esta función.
+
+    En cada iteración resuelve A·I0 = b_u y A·J0 = b_v por mínimos
+    cuadrados, arma las dos candidatas (±λ, ±μ), descarta las que dejan
+    algún punto con Z <= 0, se queda con la de menor RMS y actualiza las
+    correcciones de perspectiva ε_i = (a_i·k)/Z0.
+
+    Parámetros
+    ----------
+    obj_vecs : ndarray (n, 3) — puntos del objeto; fila 0 = M0.
+    img_vecs : ndarray (n, 2) — píxeles observados (u, v).
+    K        : ndarray (3, 3) — matriz intrínseca (admite fx != fy).
+    MaxIt    : int   — máximo de iteraciones (>= 1).
+    atol     : float — se detiene cuando el RMS no mejora al menos atol
+               píxeles respecto de la iteración anterior
+               (RMS_anterior - RMS_actual < atol; un aumento también corta).
+
+    Limitación del método: la iteración ε → ε' es un punto fijo que puede
+    no ser atractor (radio espectral >= 1) con el plano casi paralelo a la
+    imagen o perspectiva muy fuerte; ahí no converge a la pose real.
+
+    Devuelve
+    --------
+    R, t : mejor pose válida encontrada (menor RMS en todas las iteraciones).
+    info : dict con 'rms' (float), 'iteraciones' (int), 'motivo'
+           ('atol' | 'MaxIt' | 'sin candidata válida') e 'historial_rms'
+           (lista por iteración).
+
+    Lanza ValueError si en la primera iteración ninguna candidata es válida.
+    """
+    obj_vecs = np.asarray(obj_vecs, dtype=float)
+    img_vecs = np.asarray(img_vecs, dtype=float)
+    assert obj_vecs.shape[0] == img_vecs.shape[0] >= 4, "Se necesitan n >= 4 correspondencias"
+    assert MaxIt >= 1, "MaxIt debe ser >= 1"
+
+    # --- Coordenadas virtuales centradas con focal común fx (K sin skew) ---
+    fx, fy = K[0, 0], K[1, 1]
+    assert K[0, 1] == 0, "Se asume K sin skew, como heli/K.csv"
+    x_virtual = img_vecs[:, 0] - K[0, 2]
+    y_virtual = (img_vecs[:, 1] - K[1, 2]) * fx / fy
+
+    # --- Matriz del objeto A: filas a_i = M_i - M0 ---
+    M0 = obj_vecs[0]
+    vectores_objeto = obj_vecs[1:] - M0
+    assert np.all(np.abs(vectores_objeto[:, 2]) < 1e-12), "POSIT coplanar requiere W constante"
+
+    # A = [U V 0] tiene rango 2: A·I0 = b solo determina (I0_U, I0_V). La
+    # solución de mínimos cuadrados de norma mínima tiene I0_W = 0 (es la
+    # componente ⟂ al núcleo n), así que basta resolver sobre U, V con las
+    # ecuaciones normales 2×2: (AᵀA)·(I0_U, I0_V) = Aᵀ·b.
+    A_plano = vectores_objeto[:, :2]
+    gram = multiplicar(A_plano.T, A_plano)
+    det_gram = gram[0, 0] * gram[1, 1] - gram[0, 1] * gram[1, 0]
+    assert det_gram > 1e-12 * (gram[0, 0] + gram[1, 1])**2, "Puntos del objeto colineales"
+    gram_inversa = np.array([[gram[1, 1], -gram[0, 1]],
+                             [-gram[1, 0], gram[0, 0]]]) / det_gram
+    pseudoinversa = multiplicar(gram_inversa, A_plano.T)   # (2, n-1)
+
+    normal = np.array([0.0, 0.0, 1.0])
+    epsilon = np.zeros(vectores_objeto.shape[0])
+    mejor = None
+    historial_rms = []
+    motivo = 'MaxIt'
+
+    for iteracion in range(1, MaxIt + 1):
+        # --- Sistemas lineales A·I0 = b_u, A·J0 = b_v ---
+        b_u = x_virtual[1:] * (1 + epsilon) - x_virtual[0]
+        b_v = y_virtual[1:] * (1 + epsilon) - y_virtual[0]
+        I0 = np.hstack([multiplicar(pseudoinversa, b_u), 0.0])
+        J0 = np.hstack([multiplicar(pseudoinversa, b_v), 0.0])
+
+        # --- Dos candidatas; se elige la válida de menor RMS ---
+        elegida = None
+        for lam, mu in calculoLambdaMu(I0, J0):
+            _, _, eje_k, Z0, R, t = calcularSalidaPOSIT(I0 + lam * normal, J0 + mu * normal, fx,
+                                                        np.array([x_virtual[0], y_virtual[0]]), M0)
+            n_validos, rms = evaluarPose(R, t, obj_vecs, img_vecs, K)
+            if n_validos == obj_vecs.shape[0] and (elegida is None or rms < elegida[2]):
+                elegida = (R, t, rms, eje_k, Z0)
+
+        if elegida is None:
+            if mejor is None:
+                raise ValueError("POSIT: ninguna candidata deja todos los puntos con Z > 0")
+            motivo = 'sin candidata válida'
+            break
+
+        rms_anterior = historial_rms[-1] if historial_rms else np.inf
+        historial_rms.append(elegida[2])
+        if mejor is None or elegida[2] < mejor[2]:
+            mejor = elegida
+
+        # --- Criterio de corte (inciso e): sin mejora de RMS >= atol, es decir
+        # RMS_anterior - RMS_actual < atol (un aumento también corta). La
+        # mejor pose ya quedó guardada en 'mejor' ---
+        if rms_anterior - elegida[2] < atol:
+            motivo = 'atol'
+            break
+
+        # --- Correcciones de perspectiva ε_i = (a_i·k)/Z0 ---
+        eje_k, Z0 = elegida[3], elegida[4]
+        epsilon = multiplicar(vectores_objeto, eje_k) / Z0
+
+    info = {'rms': mejor[2], 'iteraciones': iteracion, 'motivo': motivo,
+            'historial_rms': historial_rms}
+    return mejor[0], mejor[1], info
+
+
+def calcularPoseObjetivo(h):
+    """
+    Inciso f: pose de la cámara centrada sobre M0 a altura h, mirando en
+    vertical hacia abajo, con la H derecha en la imagen (el punto blanco,
+    junto a M1 = superior izquierda, queda arriba a la izquierda).
+
+    Sistema del objeto: U a la derecha y V hacia arriba de la H, W = U × V
+    sale del suelo hacia arriba. Ejes de la cámara buscados:
+        i = +U (u crece a la derecha), j = -V (v crece hacia abajo),
+        k = i × j = -W (mira hacia el suelo).
+
+    Parámetros
+    ----------
+    h : float — altura del centro óptico sobre el plano de la H (h > 0).
+
+    Devuelve
+    --------
+    R : ndarray (3, 3) — diag(1, -1, -1).
+    t : ndarray (3,)   — (0, 0, h), ya que C = (0, 0, h) y t = -R·C.
+    """
+    assert h > 0, "La altura debe ser positiva"
+    R = np.array([[1.0, 0.0, 0.0],
+                  [0.0, -1.0, 0.0],
+                  [0.0, 0.0, -1.0]])
+    t = np.array([0.0, 0.0, h])
+    return R, t
