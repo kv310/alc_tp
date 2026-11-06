@@ -1,0 +1,51 @@
+# COORDENADAS DE PIXELES (u, v)
+
+# --- Cuatro puntos originales de calibracion ---
+
+# P1: frente area grande, superior
+736.22321429 316.48214286
+
+# P2: frente area grande, inferior
+732.75892857 754.71428571
+
+# P3: frente area chica, superior
+1229.55529720 388.62774306
+
+# P4: frente area chica, inferior
+1366.29414329 574.70534806
+
+# --- Cuatro puntos adicionales ---
+
+# P5: punto penal
+1006.82604273 471.79879378
+
+# P6: medialuna
+733.34835053 556.37952333
+
+# P7: banderin del corner
+1304.26827496 234.97275105
+
+# P8: poste del arco
+1525.58785060 433.73746548
+
+# --- Posicion del defensor ---
+
+# P9: pies del defensor
+826.38715303 323.78251708
+
+# --- Posiciones de los cinco atacantes ---
+
+# A1
+876.23809524 590.73809524
+
+# A2
+867.00000000 506.05555556
+
+# A3
+840.82539683 530.69047619
+
+# A4
+799.25396825 349.00793651
+
+# A5
+811.57142857 469.10317460
