@@ -38,7 +38,7 @@ def producto_escalar(u, v):
     --------
     float: el producto escalar (elemento a elemento + sum, sin np.dot).
     """
-    u, v = u.flatten(), v.flatten()   # primero aplanar: evita el broadcasting (n,1)*(n,)
+    u, v = u.reshape(-1), v.reshape(-1)   # primero aplanar: evita el broadcasting (n,1)*(n,)
     return sum(u * v)
 
 def transponer(A):
