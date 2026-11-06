@@ -1,0 +1,45 @@
+# Coordenadas de pixel (u, v)
+
+# P1: fondo, izquierda del area chica
+192.61007253 170.50442589
+
+# P2: frente, izquierda del area chica
+156.10110845 230.16541597
+
+# P3: frente, derecha del area chica
+865.79975162 249.75559181
+
+# P4: fondo, derecha del area chica
+839.97633801 189.20413920
+
+# P5: punto penal
+510.00487013 317.89935065
+
+# P6: extremo de la medialuna cercano a Enzo
+851.38149351 421.84415584
+
+# P7: extremo opuesto de la medialuna
+146.74512987 404.33766234
+
+# P8: pies de Enzo
+810.89772727 542.20129870
+
+# --- Posiciones de los seis jugadores ---
+
+# J1
+811.99188312 544.38961039
+
+# J2
+845.91071429 350.72402597
+
+# J3
+373.23538961 323.37012987
+
+# J4
+243.03084416 401.05519481
+
+# J5
+98.60227273 533.44805195
+
+# J6
+380.89448052 294.92207792
